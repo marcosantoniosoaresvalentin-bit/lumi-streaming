@@ -1,0 +1,14 @@
+LUMI+ — projeto Android com o HTML ORIGINAL incluído.
+
+O HTML original está em app/src/main/assets/www/index.html.
+
+PASSOS:
+1. Extraia este ZIP no celular.
+2. Envie TODOS os arquivos e pastas para a raiz do repositório marcosantoniosoaresvalentin-bit/lumi-streaming, preservando a pasta .github.
+3. Faça Commit changes.
+4. Abra a aba Actions no GitHub e habilite Actions se for solicitado.
+5. Execute o workflow “Gerar APK LUMI+” (Run workflow) ou aguarde a execução automática após o commit.
+6. Quando terminar com sucesso, abra a execução e baixe o artifact “LUMI-plus-APK”.
+7. Extraia o ZIP baixado para encontrar app-debug.apk.
+
+Este APK debug serve para testes, não é um APK assinado para Play Store. O HTML original foi incluído. O protótipo usa armazenamento local para filmes personalizados; login e catálogo compartilhados exigem backend separado.
