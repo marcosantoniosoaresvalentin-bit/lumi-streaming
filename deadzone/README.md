@@ -22,6 +22,20 @@ colocar direto dentro do APK. Só o modo online precisa de internet.
   *Configurações → Qualidade gráfica*: **Alta** = tudo ligado; **Média** = sem reflexos
   e sombra mais leve; **Baixa** = sem grama densa e sem sombras.
 - Correção: as cores de grama/arbustos instanciados ficavam pretas (buffer de cor vazio).
+- **Relevo**: morros e montanhas (mais altas nas bordas do mapa). Cidades, estradas,
+  lagos, heliportos e construções continuam planos. Jogador, bots, carros (com inclinação),
+  árvores, grama e loot seguem o terreno, e os morros bloqueiam tiro e visão.
+- **Construções detalhadas**: rodapé, frisos entre andares, peitoris e vergas nas janelas,
+  venezianas coloridas, varandas com grade, ar-condicionado, degrau e toldo na porta,
+  calhas e chaminés.
+- **Janelas quebráveis**: tiros e explosões estilhaçam o vidro (com cacos caindo e som).
+  Pela janela quebrada passam tiros e a linha de visão.
+- **Animações com captura de movimento**: parado, andar e correr usam animações reais
+  (mocap), misturadas com a pose do jogo; com arma na mão, as pernas usam o mocap e
+  o tronco continua mirando.
+- **Ilha flutuante**: rocha orgânica com textura em vez de blocos, topo de grama,
+  árvore gigante realista, construções com textura de pedra, cachoeiras animadas
+  e lago com ondas.
 
 ## Editar e gerar de novo
 ```

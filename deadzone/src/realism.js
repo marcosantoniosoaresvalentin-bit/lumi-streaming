@@ -316,6 +316,196 @@
   };
 
   /* =====================================================================
+     RELEVO: morros e montanhas fora das cidades, estradas e construções
+     ===================================================================== */
+  window.TERH = window.TERH || function () { return 0; };
+  DZR.terrain = function (spots) {
+    const S = 12, N = 201, O = -1200, D = new Float32Array(N * N).fill(1e6);
+    const idx = (i, j) => j * N + i, cl = v => Math.max(0, Math.min(N - 1, v));
+    const mark = (x0, z0, x1, z1) => { for (let j = cl(Math.floor((z0 - O) / S)); j <= cl(Math.ceil((z1 - O) / S)); j++) for (let i = cl(Math.floor((x0 - O) / S)); i <= cl(Math.ceil((x1 - O) / S)); i++) D[idx(i, j)] = 0; };
+    const circ = (x, z, r) => mark(x - r, z - r, x + r, z + r);
+    try { for (const r of RDS) mark(r[0] - 4, r[1] - 4, r[2] + 4, r[3] + 4); } catch (e) { }
+    try { for (const b of FP) mark(b.x0 - 6, b.z0 - 6, b.x1 + 6, b.z1 + 6); } catch (e) { }
+    try { for (const c of CITIES) mark(c.x - 110, c.z - 110, c.x + 110, c.z + 110); } catch (e) { }
+    try { for (const l of LK) circ(l.x, l.z, l.r + 14); } catch (e) { }
+    for (const s of spots || []) circ(s[0], s[1], 85);
+    // transformada de distância (chanfro, 2 passadas)
+    const d1 = S, d2 = S * 1.4142;
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { let v = D[idx(i, j)]; if (i > 0) v = Math.min(v, D[idx(i - 1, j)] + d1); if (j > 0) { v = Math.min(v, D[idx(i, j - 1)] + d1); if (i > 0) v = Math.min(v, D[idx(i - 1, j - 1)] + d2); if (i < N - 1) v = Math.min(v, D[idx(i + 1, j - 1)] + d2); } D[idx(i, j)] = v; }
+    for (let j = N - 1; j >= 0; j--) for (let i = N - 1; i >= 0; i--) { let v = D[idx(i, j)]; if (i < N - 1) v = Math.min(v, D[idx(i + 1, j)] + d1); if (j < N - 1) { v = Math.min(v, D[idx(i, j + 1)] + d1); if (i < N - 1) v = Math.min(v, D[idx(i + 1, j + 1)] + d2); if (i > 0) v = Math.min(v, D[idx(i - 1, j + 1)] + d2); } D[idx(i, j)] = v; }
+    // ruído suave (value noise) em várias escalas
+    const hh = (x, z) => { const v = Math.sin(x * 127.1 + z * 311.7) * 43758.5453; return v - Math.floor(v); };
+    const vn = (x, z) => { const xi = Math.floor(x), zi = Math.floor(z), xf = x - xi, zf = z - zi, u = xf * xf * (3 - 2 * xf), w = zf * zf * (3 - 2 * zf); return (hh(xi, zi) * (1 - u) + hh(xi + 1, zi) * u) * (1 - w) + (hh(xi, zi + 1) * (1 - u) + hh(xi + 1, zi + 1) * u) * w; };
+    const fbm = (x, z) => vn(x, z) * .55 + vn(x * 2.1 + 5.2, z * 2.1 + 1.3) * .28 + vn(x * 4.3 + 9.1, z * 4.3 + 3.7) * .17;
+    const ss = (a, b, v) => { const t = Math.max(0, Math.min(1, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
+    const H = new Float32Array(N * N);
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const x = O + i * S, z = O + j * S;
+      let h = Math.pow(fbm(x / 380 + 3.1, z / 380 + 7.7), 1.6) * 46 + (fbm(x / 110, z / 110) - .35) * 7;
+      const e = Math.max(Math.abs(x), Math.abs(z)), edge = ss(820, 1180, e);
+      const ridge = 1 - Math.abs(fbm(x / 160 + 11, z / 160 + 4) * 2 - 1);
+      h += edge * (35 + ridge * 45);
+      H[idx(i, j)] = Math.max(0, h) * ss(10, 70, D[idx(i, j)]);
+    }
+    DZR.H = H;
+    // mesma triangulação do PlaneGeometry: altura idêntica à malha
+    const TERH = function (x, z) {
+      let fx = (x - O) / S, fz = (z - O) / S; if (fx < 0 || fz < 0 || fx >= N - 1 || fz >= N - 1) return 0;
+      const i = Math.floor(fx), j = Math.floor(fz), u = fx - i, v = fz - j;
+      const a = H[idx(i, j)], b = H[idx(i, j + 1)], c = H[idx(i + 1, j + 1)], d = H[idx(i + 1, j)];
+      return u + v <= 1 ? a + (d - a) * u + (b - a) * v : c + (b - c) * (1 - u) + (d - c) * (1 - v);
+    };
+    window.TERH = TERH;
+    // malha do chão com relevo
+    try {
+      const g = new T.PlaneGeometry(2400, 2400, N - 1, N - 1), P = g.attributes.position;
+      for (let k = 0; k < P.count; k++) { const x = P.getX(k), z = -P.getY(k); P.setZ(k, TERH(x, z)); }
+      g.computeVertexNormals(); g.computeBoundingSphere();
+      gr.geometry.dispose(); gr.geometry = g;
+    } catch (e) { console.warn('terreno', e); }
+    return TERH;
+  };
+
+  /* =====================================================================
+     JANELAS DE VIDRO QUEBRÁVEIS
+     ===================================================================== */
+  const DZW = window.DZW = { cells: new Map(), panes: [], broken: 0 };
+  const wkey = (x, z) => Math.floor(x / 32) * 4096 + Math.floor(z / 32);
+  let GLM = null;
+  DZW.mat = () => GLM || (GLM = new T.MeshStandardMaterial({ color: lin(0x8fb4c8), metalness: .2, roughness: .05, transparent: true, opacity: .42, depthWrite: false, side: T.DoubleSide, envMapIntensity: 1.6 }));
+  // g: grupo do prédio (já posicionado); list: [px,py,pz,ry] locais; tamanho da vidraça 1.2 x 1.1
+  DZW.add = function (g, list, W_, H_) {
+    if (!list.length) return;
+    const hw = (W_ || 1.2) / 2, hh_ = (H_ || 1.1) / 2;
+    g.updateMatrix(); g.updateMatrixWorld(true);
+    const pos = new Float32Array(list.length * 18), nrm = new Float32Array(list.length * 18), m = g.matrixWorld;
+    const v = new T.Vector3(), ax = new T.Vector3(), nn = new T.Vector3(), c = new T.Vector3();
+    list.forEach((w, k) => {
+      const [px, py, pz, ry] = w, cs = Math.cos(ry), sn = Math.sin(ry);
+      const lu = [cs, 0, -sn], ln = [sn, 0, cs];
+      const Q = [[-1, -1], [1, -1], [1, 1], [-1, -1], [1, 1], [-1, 1]];
+      Q.forEach((q, i) => { const o = k * 18 + i * 3; pos[o] = px + lu[0] * hw * q[0]; pos[o + 1] = py + hh_ * q[1]; pos[o + 2] = pz + lu[2] * hw * q[0]; nrm[o] = ln[0]; nrm[o + 1] = 0; nrm[o + 2] = ln[2]; });
+      c.set(px, py, pz).applyMatrix4(m); ax.set(lu[0], 0, lu[2]).transformDirection(m); nn.set(ln[0], 0, ln[2]).transformDirection(m);
+      const P_ = { c: c.clone(), u: ax.clone(), n: nn.clone(), hw, hh: hh_, k, br: 0 };
+      DZW.panes.push(P_); const key = wkey(c.x, c.z); let a = DZW.cells.get(key); if (!a) DZW.cells.set(key, a = []); a.push(P_); list[k] = P_;
+    });
+    const geo = new T.BufferGeometry(); geo.setAttribute('position', new T.BufferAttribute(pos, 3)); geo.setAttribute('normal', new T.BufferAttribute(nrm, 3)); geo.computeBoundingSphere();
+    const me = new T.Mesh(geo, DZW.mat()); me.renderOrder = 2; g.add(me);
+    for (const p of list) p.mesh = me;
+  };
+  function near3(x, z, f) { const i0 = Math.floor(x / 32), j0 = Math.floor(z / 32); for (let i = i0 - 1; i <= i0 + 1; i++) for (let j = j0 - 1; j <= j0 + 1; j++) { const a = DZW.cells.get(i * 4096 + j); if (a) for (const p of a) if (f(p)) return true; } return false; }
+  // ponto dentro do vão de uma janela quebrada (tiro e visão passam)
+  DZW.hole = function (x, y, z) {
+    if (!DZW.broken) return false;
+    const a = DZW.cells.get(wkey(x, z)); if (!a) return false;
+    for (const p of a) { if (!p.br) continue; const dx = x - p.c.x, dy = y - p.c.y, dz = z - p.c.z; if (Math.abs(dy) < p.hh + .05 && Math.abs(dx * p.u.x + dz * p.u.z) < p.hw + .05 && Math.abs(dx * p.n.x + dz * p.n.z) < .5) return true; }
+    return false;
+  };
+  function rayPane(p, o, d) {
+    const dn = d.x * p.n.x + d.y * p.n.y + d.z * p.n.z; if (Math.abs(dn) < 1e-4) return 1e9;
+    const t = ((p.c.x - o.x) * p.n.x + (p.c.y - o.y) * p.n.y + (p.c.z - o.z) * p.n.z) / dn; if (t <= 0) return 1e9;
+    const hx = o.x + d.x * t - p.c.x, hy = o.y + d.y * t - p.c.y, hz = o.z + d.z * t - p.c.z;
+    return (Math.abs(hy) < p.hh && Math.abs(hx * p.u.x + hz * p.u.z) < p.hw) ? t : 1e9;
+  }
+  // tiro: quebra a primeira vidraça intacta no caminho (até "maxT")
+  DZW.shoot = function (o, d, maxT) {
+    const seen = new Set(); let best = null, bt = Math.min(maxT, 400);
+    for (let s = 0; s <= bt + 32; s += 16) {
+      const x = o.x + d.x * s, z = o.z + d.z * s;
+      near3(x, z, p => { if (p.br || seen.has(p)) return false; seen.add(p); const t = rayPane(p, o, d); if (t < bt) { bt = t; best = p; } return false; });
+      if (best && s > bt + 16) break;
+    }
+    if (!best) return 0;
+    const q = Math.max(0, bt - .45);
+    try { if (typeof blocked === 'function' && blocked(o.x, o.y, o.z, o.x + d.x * q, o.y + d.y * q, o.z + d.z * q)) return 0; } catch (e) { }
+    DZW.breakPane(best, d); return 1;
+  };
+  DZW.blast = function (x, y, z, r) {
+    near3(x, z, p => { if (!p.br && Math.hypot(p.c.x - x, p.c.y - y, p.c.z - z) < r) DZW.breakPane(p, new T.Vector3(p.c.x - x, p.c.y - y, p.c.z - z).normalize()); return false; });
+  };
+  DZW.breakPane = function (p, dir) {
+    if (p.br) return; p.br = 1; DZW.broken++;
+    const a = p.mesh.geometry.attributes.position; for (let i = 0; i < 6; i++) a.setXYZ(p.k * 6 + i, 0, -50, 0); a.needsUpdate = true;
+    spawnShards(p, dir);
+    try { const dd = (typeof P !== 'undefined') ? Math.hypot(p.c.x - P.x, p.c.z - P.z) : 0, k = Math.max(0, 1 - dd / 60); if (k > 0) { sfx(5200, .4 * k, .25, 0); sfx(2600, .3 * k, .55, 0); } } catch (e) { }
+  };
+  // estilhaços de vidro
+  let SHM = null; const SH = [];
+  function spawnShards(p, dir) {
+    if (!SHM) {
+      const g = new T.BufferGeometry(); g.setAttribute('position', new T.Float32BufferAttribute([-.06, -.05, 0, .07, -.04, 0, 0, .08, 0], 3)); g.computeVertexNormals();
+      SHM = new T.InstancedMesh(g, new T.MeshStandardMaterial({ color: lin(0xcfe6f2), metalness: .3, roughness: .05, transparent: true, opacity: .8, side: T.DoubleSide }), 400);
+      SHM.count = 0; SHM.frustumCulled = false; SHM.instanceMatrix.setUsage(T.DynamicDrawUsage); sc.add(SHM);
+    }
+    const side = (dir && (dir.x * p.n.x + dir.z * p.n.z) < 0) ? -1 : 1;
+    for (let i = 0; i < 18; i++) {
+      if (SH.length >= 400) SH.shift();
+      const u = (Math.random() * 2 - 1) * p.hw, v = (Math.random() * 2 - 1) * p.hh, sp = 1 + Math.random() * 3;
+      SH.push({ x: p.c.x + p.u.x * u, y: p.c.y + v, z: p.c.z + p.u.z * u, vx: p.n.x * side * sp + (Math.random() - .5), vy: Math.random() * 1.5, vz: p.n.z * side * sp + (Math.random() - .5), rx: Math.random() * 6, ry: Math.random() * 6, s: .6 + Math.random() * 1.4, t: 0, gy: null });
+    }
+  }
+  const _o3 = new T.Object3D();
+  DZR.shardTick = function (dt) {
+    if (!SHM) return; let n = 0;
+    for (let i = SH.length - 1; i >= 0; i--) {
+      const s = SH[i]; s.t += dt; if (s.t > 6) { SH.splice(i, 1); continue; }
+      if (s.gy == null) { let g = 0; try { g = GY(s.x, s.z, s.y); } catch (e) { } s.gy = g; }
+      if (s.y > s.gy + .02) { s.vy -= 9.8 * dt; s.x += s.vx * dt; s.y += s.vy * dt; s.z += s.vz * dt; s.rx += dt * 9; s.ry += dt * 7; if (s.y <= s.gy + .02) { s.y = s.gy + .02; s.vx *= .2; s.vz *= .2; s.rx = Math.PI / 2; } }
+    }
+    for (const s of SH) { _o3.position.set(s.x, s.y, s.z); _o3.rotation.set(s.rx, s.ry, 0); _o3.scale.setScalar(s.s * (s.t > 5 ? 6 - s.t : 1)); _o3.updateMatrix(); SHM.setMatrixAt(n++, _o3.matrix); }
+    SHM.count = n; SHM.instanceMatrix.needsUpdate = true;
+  };
+
+  /* =====================================================================
+     ILHA FLUTUANTE: rocha orgânica, grama, árvore gigante, pedra e água
+     ===================================================================== */
+  DZR.islandRock = function (cx, cz, half, topY, depth, seed, holeR) {
+    const r = rng(seed), seg = 28, rings = 9, P = [], idxs = [], uv = [];
+    // anel do topo (quadrado arredondado) + anéis que afunilam para baixo com ruído
+    for (let k = 0; k <= rings; k++) {
+      const f = k / rings, y = topY - .2 - Math.pow(f, 1.25) * depth, sc_ = Math.pow(1 - f, .85) * (1 + (k ? (r() - .5) * .08 : 0));
+      for (let i = 0; i < seg; i++) {
+        const a = i / seg * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a), m = Math.max(Math.abs(ca), Math.abs(sa)), sq = .55 + .45 / m;
+        const ns = k === 0 ? 1.02 : 1 + (r() - .5) * .22, R_ = half * Math.min(sq, 1.38) * sc_ * ns * (k === 0 ? 1 : .98);
+        P.push(cx + ca * R_, k === rings ? topY - depth - 6 : y + (k ? (r() - .5) * 1.5 : 0), cz + sa * R_); uv.push(i / seg * 6, f * 4);
+      }
+    }
+    for (let k = 0; k < rings; k++) for (let i = 0; i < seg; i++) { const a = k * seg + i, b = k * seg + (i + 1) % seg, c = (k + 1) * seg + i, d = (k + 1) * seg + (i + 1) % seg; idxs.push(a, c, b, b, c, d); }
+    const g = new T.BufferGeometry(); g.setAttribute('position', new T.Float32BufferAttribute(P, 3)); g.setAttribute('uv', new T.Float32BufferAttribute(uv, 2)); g.setIndex(idxs); g.computeVertexNormals();
+    const tex = mats().rock.map.clone(); tex.needsUpdate = true; tex.repeat.set(1, 1);
+    const m = new T.Mesh(g, new T.MeshStandardMaterial({ map: tex, bumpMap: tex, bumpScale: .08, color: lin(0x9c9284), roughness: .95, side: T.DoubleSide }));
+    m.castShadow = false; m.receiveShadow = true;
+    // tampa de grama
+    let tg;
+    if (holeR) { const sh = new T.Shape(); const H2 = half * 1.01; sh.moveTo(-H2, -H2); sh.lineTo(H2, -H2); sh.lineTo(H2, H2); sh.lineTo(-H2, H2); sh.lineTo(-H2, -H2); const ho = new T.Path(); ho.absarc(0, 0, holeR, 0, Math.PI * 2, true); sh.holes.push(ho); tg = new T.ShapeGeometry(sh, 32); const U = tg.attributes.uv; for (let i = 0; i < U.count; i++) U.setXY(i, (U.getX(i) + H2) / (2 * H2), (U.getY(i) + H2) / (2 * H2)); }
+    else tg = new T.PlaneGeometry(half * 2.02, half * 2.02, 1, 1);
+    const top = new T.Mesh(tg, DZR._islandGrass || (DZR._islandGrass = (() => { const t = imgTex('grass', 6, 6); return new T.MeshStandardMaterial({ map: t, roughness: 1, color: lin(0xd6e0c4) }); })()));
+    top.material.map.repeat.set(half / 6, half / 6); top.rotation.x = -Math.PI / 2; top.position.set(cx, topY - .02, cz); top.receiveShadow = true;
+    const grp = new T.Group(); grp.add(m, top); return grp;
+  };
+  // material de pedra/madeira por coordenada do mundo, para as construções de blocos da ilha
+  DZR.stoneMat = function () {
+    const t = mats().rock.map;
+    const m = new T.MeshStandardMaterial({ vertexColors: true, map: t, roughness: .9, metalness: 0 });
+    m.onBeforeCompile = s => {
+      s.vertexShader = 'varying vec3 vWPos;varying vec3 vWNrm;\n' + s.vertexShader.replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWPos=(modelMatrix*vec4(transformed,1.)).xyz;vWNrm=normalize(mat3(modelMatrix)*objectNormal);');
+      s.fragmentShader = 'varying vec3 vWPos;varying vec3 vWNrm;\n' + s.fragmentShader.replace('#include <map_fragment>', 'vec3 an=abs(vWNrm);vec2 bu=an.x>an.z?vWPos.zy:vWPos.xy;if(an.y>.7)bu=vWPos.xz;vec4 texelColor=texture2D(map,bu*.35);texelColor=mapTexelToLinear(texelColor);diffuseColor.rgb*=mix(vec3(1.),texelColor.rgb*1.9,.75);');
+    };
+    return m;
+  };
+  // cachoeira: faixas que descem
+  DZR.fallMat = function () {
+    const m = new T.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: .75, depthWrite: false });
+    const U = { value: 0 }; DZR._fallT = U;
+    m.onBeforeCompile = s => {
+      s.uniforms.uT = U;
+      s.vertexShader = 'varying vec3 vWPos;\n' + s.vertexShader.replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWPos=(modelMatrix*vec4(transformed,1.)).xyz;');
+      s.fragmentShader = 'uniform float uT;varying vec3 vWPos;\n' + s.fragmentShader.replace('#include <map_fragment>', 'float st=fract((vWPos.y+uT*9.)*.18+sin((vWPos.x+vWPos.z)*3.1)*.3);float fo=smoothstep(.0,.25,st)*smoothstep(1.,.6,st);diffuseColor.rgb=mix(diffuseColor.rgb,vec3(1.),fo*.55);diffuseColor.a*=.55+.45*fo;');
+    };
+    return m;
+  };
+
+  /* =====================================================================
      PERSONAGEM REALISTA
      ===================================================================== */
   let TPL = null;           // modelo base calibrado
@@ -366,12 +556,29 @@
     return D;
   }
 
+  // mede a velocidade de deslocamento de cada animação (amplitude do pé / duração)
+  function clipSpeeds() {
+    const sc_ = TPL.scene, B = boneMap(sc_), D = TPL.D, keep = {};
+    for (const k in B) keep[k] = [B[k].quaternion.clone(), B[k].position.clone()];
+    const mx = new T.AnimationMixer(sc_), v = new T.Vector3(), h = new T.Vector3();
+    for (const nm of ['Walk', 'Run']) {
+      const c = TPL.clips[nm]; if (!c) continue; const a = mx.clipAction(c); a.reset().play(); let mn = 1e9, mxv = -1e9;
+      for (let i = 0; i <= 40; i++) { mx.setTime(c.duration * i / 40); sc_.updateMatrixWorld(true); v.setFromMatrixPosition(B.LeftFoot.matrixWorld); h.setFromMatrixPosition(B.Hips.matrixWorld); const z = (v.z - h.z) * D.s; mn = Math.min(mn, z); mxv = Math.max(mxv, z); }
+      a.stop(); TPL['v' + nm] = Math.max(.6, 2 * (mxv - mn) / c.duration);
+    }
+    mx.stopAllAction(); mx.uncacheRoot(sc_);
+    for (const k in B) { B[k].quaternion.copy(keep[k][0]); B[k].position.copy(keep[k][1]); }
+    TPL.vWalk = TPL.vWalk || 1.4; TPL.vRun = TPL.vRun || 4;
+  }
+
   function load() {
     if (!window.THREE || !T.GLTFLoader || !ASSET.soldier.startsWith('data:')) return;
     try {
       new T.GLTFLoader().parse(b64ab(ASSET.soldier), '', g => {
         const scene = g.scene; scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; if (o.material) { o.material.envMapIntensity = .8; } } });
-        TPL = { scene, D: calibrate(scene) }; DZR.ready = true;
+        TPL = { scene, D: calibrate(scene), clips: {} }; DZR.ready = true;
+        for (const c of g.animations || []) TPL.clips[c.name] = c;
+        try { clipSpeeds(); } catch (e) { console.warn('clipSpeeds', e); }
         for (const r of DZR.rigs) attach(r);
       }, e => console.warn('soldier.glb', e));
     } catch (e) { console.warn('DZR.load', e); }
@@ -386,7 +593,13 @@
     const meshes = [];
     scn.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); meshes.push(o); } });
     rig.pl.add(root);
-    rig.av = { root, inner, B, meshes, tint: -1, near: false };
+    rig.av = { root, inner, B, meshes, tint: -1, near: false, lw: 0, ph: Math.random() };
+    if (TPL.clips.Idle && TPL.clips.Walk && TPL.clips.Run) {
+      const mx = new T.AnimationMixer(scn), act = {};
+      for (const k of ['Idle', 'Walk', 'Run']) { const a = mx.clipAction(TPL.clips[k]); a.play(); a.setEffectiveWeight(0); act[k] = a; }
+      act.Walk.timeScale = act.Run.timeScale = 0; act.Idle.time = Math.random() * TPL.clips.Idle.duration;
+      rig.av.mx = mx; rig.av.act = act;
+    }
     root.visible = false;
   }
 
@@ -433,7 +646,29 @@
     fa.quaternion.copy(armA.clone().invert().multiply(faA));
   }
 
-  function pose(rig) {
+  const LOWER = new Set(['Hips', 'LeftUpLeg', 'LeftLeg', 'LeftFoot', 'LeftToeBase', 'RightUpLeg', 'RightLeg', 'RightFoot', 'RightToeBase']);
+  const UPPER = ['Spine', 'Spine1', 'Spine2', 'Neck', 'Head', 'LeftShoulder', 'LeftArm', 'LeftForeArm', 'LeftHand', 'RightShoulder', 'RightArm', 'RightForeArm', 'RightHand'];
+  const ALLB = new Set([...LOWER, ...UPPER]);
+  // animações de captura de movimento (parado/andar/correr) misturadas à pose do jogo
+  function loco(rig, dt) {
+    const av = rig.av, L = rig.loco; if (!av.mx) return null;
+    av.lw += (((L && L.w) || 0) - av.lw) * Math.min(1, dt * 8); if (av.lw < .01) return null;
+    const sp = Math.max(0, L.sp || 0), A = av.act, cW = TPL.clips.Walk, cR = TPL.clips.Run;
+    const wi = Math.max(0, 1 - sp / .7), wr = Math.max(0, Math.min(1, (sp - 2.3) / 1.6)), ww = Math.max(0, 1 - wi - wr);
+    A.Idle.setEffectiveWeight(wi); A.Walk.setEffectiveWeight(ww); A.Run.setEffectiveWeight(wr);
+    // fase única para andar/correr (os pés não "patinam" na transição)
+    const rate = (ww * sp / TPL.vWalk / cW.duration + wr * sp / TPL.vRun / cR.duration) / Math.max(.001, ww + wr);
+    av.ph = (av.ph + dt * rate * ((L.fw != null && L.fw < -.3) ? -1 : 1) + 1) % 1;
+    A.Walk.time = av.ph * cW.duration; A.Run.time = av.ph * cR.duration;
+    av.mx.update(dt);
+    const set = L.arm ? LOWER : ALLB, sv = {};
+    for (const k of set) if (av.B[k]) sv[k] = av.B[k].quaternion.clone();
+    sv._hp = av.B.Hips.position.clone(); sv._set = set; sv._w = av.lw;
+    return sv;
+  }
+
+  function pose(rig, dt) {
+    const sv = loco(rig, dt || .016);
     const av = rig.av, B = av.B, D = TPL.D;
     rig.pl.updateMatrixWorld(true);
     rig.inv = (rig.inv || new T.Matrix4()).copy(rig.pl.matrixWorld).invert();
@@ -451,6 +686,7 @@
     const walk = (b, parentA) => {
       const k = bname(b); let A;
       if (tgt[k]) A = tgt[k].clone().multiply(D.Q0[k]); else A = parentA.clone().multiply(D.L0[k] || b.quaternion);
+      if (sv && sv[k]) A.slerp(parentA.clone().multiply(sv[k]), sv._w);
       b.quaternion.copy(parentA.clone().invert().multiply(A));
       W[k] = A; if (k === 'RightArm' || k === 'LeftArm') QW[k + 'P'] = parentA.clone();
       if (k === 'RightArm' || k === 'LeftArm' || k === 'RightForeArm' || k === 'LeftForeArm') QA[k] = A;
@@ -466,11 +702,11 @@
     const local = hipsTarget.clone();
     // espaço do avatar -> espaço "wrap" usado na calibração (mesma origem/escala do grupo inner)
     local.applyMatrix4(pInv);
-    B.Hips.position.copy(local);
+    B.Hips.position.copy(local); if (sv) B.Hips.position.lerp(sv._hp, sv._w);
     walk(B.Hips, D.hipsParentQ);
     // IK das mãos para segurar a arma exatamente onde ela está
     rig.ainv = (rig.ainv || new T.Matrix4()).copy(av.root.matrixWorld).invert();
-    if (rig._dist < 30) { av.inner.updateMatrixWorld(true); ikArm(rig, 'Right', rig.aR); ikArm(rig, 'Left', rig.aL); }
+    if (rig._dist < 30 && !(sv && !rig.loco.arm && sv._w > .5)) { av.inner.updateMatrixWorld(true); ikArm(rig, 'Right', rig.aR); ikArm(rig, 'Left', rig.aL); }
   }
 
   function effVisible(o) { while (o) { if (!o.visible) return false; if (o.isScene) return true; o = o.parent; } return false; }
@@ -507,9 +743,9 @@
       if (rd.some(r => x > r[0] - .6 && x < r[2] + .6 && z > r[1] - .6 && z < r[3] + .6)) continue;
       if (fp.some(b => x > b.x0 - .8 && x < b.x1 + .8 && z > b.z0 - .8 && z < b.z1 + .8)) continue;
       if (lk.some(l => Math.hypot(x - l.x, z - l.z) < l.r + 7.5)) continue;
-      let gy = 0; try { gy = GY(x, z, .5); } catch (e) { } if (gy > .05) continue;
+      let gy = 0; const th = TERH(x, z); try { gy = GY(x, z, th + .5); } catch (e) { } if (gy > th + .05) continue;
       const fade = Math.min(1, (Rr - d) / 6), sc_ = (.75 + h3 * .7) * fade;
-      o.position.set(x, 0, z); o.rotation.set(0, h1 * 6.283, 0); o.scale.set(sc_ * (1 + h2 * .4), sc_ * (.8 + h1 * .6), sc_); o.updateMatrix();
+      o.position.set(x, TERH(x, z), z); o.rotation.set(0, h1 * 6.283, 0); o.scale.set(sc_ * (1 + h2 * .4), sc_ * (.8 + h1 * .6), sc_); o.updateMatrix();
       M.setMatrixAt(n, o.matrix); const k = .8 + h2 * .3; col.setRGB(k, k * (.95 + h1 * .1), k * (.75 + h3 * .2)); M.setColorAt(n, col); n++;
     }
     M.count = n; M.instanceMatrix.needsUpdate = true; if (M.instanceColor) M.instanceColor.needsUpdate = true;
@@ -519,6 +755,7 @@
   function update() {
     const now = performance.now(), dt = Math.min(.1, (now - lastT) / 1000); lastT = now;
     for (const nm of DZR.water) { nm.offset.x += dt * .012; nm.offset.y += dt * .007; }
+    try { DZR.shardTick(dt); if (DZR._fallT) DZR._fallT.value += dt; if (typeof mode !== 'undefined' && mode !== 'plane' && mode !== 'lobby' && cam.position.y < TERH(cam.position.x, cam.position.z) + .45) cam.position.y = TERH(cam.position.x, cam.position.z) + .45; } catch (e) { }
     try { grassField(); } catch (e) { if (!DZR._gerr) { DZR._gerr = 1; console.warn('grass', e); } }
     if (!TPL) return;
     const q = (typeof CFG !== 'undefined' && CFG.q != null) ? CFG.q : 2, lod = q === 0 ? 30 : q === 1 ? 50 : DZR.lod;
@@ -539,7 +776,7 @@
         else c = lin(PALETTE[rig.seed]);
         for (const m of av.meshes) if (m.material && m.material.color && !/visor/i.test(m.name)) m.material.color.copy(c);
       }
-      pose(rig);
+      pose(rig, dt);
     }
   }
   DZR.update = update;
